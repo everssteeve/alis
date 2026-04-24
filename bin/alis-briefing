@@ -1,0 +1,5 @@
+#!/bin/bash
+# ALIS — Génération du briefing Guardian (samedi 07h00)
+exec /Users/steeve/.local/bin/claude --dangerously-skip-permissions -p \
+  "$(cat /Users/steeve/Dev/repos/alis/routines/routine-briefing.md)" \
+  2>&1 | tee -a /Users/steeve/Dev/repos/alis/logs/briefing.log

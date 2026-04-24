@@ -1,0 +1,5 @@
+#!/bin/bash
+# ALIS — Scoring des signaux (mercredi 07h00)
+exec /Users/steeve/.local/bin/claude --dangerously-skip-permissions -p \
+  "$(cat /Users/steeve/Dev/repos/alis/routines/routine-score.md)" \
+  2>&1 | tee -a /Users/steeve/Dev/repos/alis/logs/score.log

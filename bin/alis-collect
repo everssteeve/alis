@@ -1,0 +1,5 @@
+#!/bin/bash
+# ALIS — Collecte hebdomadaire de signaux (lundi 07h00)
+exec /Users/steeve/.local/bin/claude --dangerously-skip-permissions -p \
+  "$(cat /Users/steeve/Dev/repos/alis/routines/routine-collect.md)" \
+  2>&1 | tee -a /Users/steeve/Dev/repos/alis/logs/collect.log
