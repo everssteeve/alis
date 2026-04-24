@@ -1,0 +1,29 @@
+[project]
+name = "alis"
+version = "0.1.0"
+description = "AIAD Lunar Intelligence System — CLI d'automatisation du cycle ALIS"
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic>=0.40.0",
+    "click>=8.1",
+    "ephem>=4.1",
+    "httpx>=0.27",
+    "beautifulsoup4>=4.12",
+    "feedparser>=6.0",
+    "python-dotenv>=1.0",
+    "rich>=13.0",
+]
+
+[project.scripts]
+alis = "alis.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
