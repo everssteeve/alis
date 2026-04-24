@@ -20,8 +20,92 @@ from ..models import Signal, SignalScore
 
 console = Console()
 
-# Sources de veille — étendre via WATCHLIST.md
+# ─────────────────────────────────────────────────────────────────────────────
+# Sources de veille automatisables — Cartographie ALIS v1.0
+# Référence complète : sources/VEILLE-CARTOGRAPHIE.md
+# ─────────────────────────────────────────────────────────────────────────────
+
 DEFAULT_SOURCES: list[dict] = [
+
+    # ── Strate 1 — Rapports de fond (signal structurel) ──────────────────────
+    {
+        "id": "anthropic-research",
+        "name": "Anthropic Research — Publications",
+        "type": "web",
+        "url": "https://www.anthropic.com/research",
+        "category": "écosystème",
+        "keywords": ["agent", "coding", "agentic", "specification", "context"],
+        "strate": 1,
+    },
+    {
+        "id": "github-octoverse",
+        "name": "GitHub Blog — AI & Octoverse",
+        "type": "rss",
+        "url": "https://github.blog/feed/",
+        "category": "écosystème",
+        "keywords": ["ai", "copilot", "spec", "agent", "coding", "octoverse"],
+        "strate": 1,
+    },
+
+    # ── Strate 2 — Newsletters (signal tactique) ─────────────────────────────
+    {
+        "id": "simon-willison",
+        "name": "Simon Willison's Weblog",
+        "type": "rss",
+        "url": "https://simonwillison.net/atom/everything/",
+        "category": "écosystème",
+        "keywords": ["llm", "agent", "claude", "spec", "coding", "ai"],
+        "strate": 2,
+    },
+    {
+        "id": "latent-space",
+        "name": "Latent Space (swyx + Alessio)",
+        "type": "rss",
+        "url": "https://www.latent.space/feed",
+        "category": "écosystème",
+        "keywords": ["agent", "engineering", "spec", "context", "ai"],
+        "strate": 2,
+    },
+    {
+        "id": "ethan-mollick",
+        "name": "Ethan Mollick — One Useful Thing",
+        "type": "rss",
+        "url": "https://www.oneusefulthing.org/feed",
+        "category": "framework",
+        "keywords": ["ai", "agent", "productivity", "workflow", "human"],
+        "strate": 2,
+    },
+
+    # ── Strate 3 — Médias techniques (signal éditorial) ──────────────────────
+    {
+        "id": "infoq-ai",
+        "name": "InfoQ — AI/ML & Architecture",
+        "type": "rss",
+        "url": "https://feed.infoq.com/",
+        "category": "framework",
+        "keywords": ["agent", "specification", "architecture", "ai", "sdd", "spec"],
+        "strate": 3,
+    },
+    {
+        "id": "thenewstack-ai",
+        "name": "The New Stack — AI Engineering",
+        "type": "rss",
+        "url": "https://thenewstack.io/feed/",
+        "category": "écosystème",
+        "keywords": ["agent", "ai engineering", "spec", "context", "agentic"],
+        "strate": 3,
+    },
+
+    # ── Strate 4 — Sources primaires éditeurs (signal produit) ───────────────
+    {
+        "id": "anthropic-news",
+        "name": "Anthropic — Blog & News",
+        "type": "rss",
+        "url": "https://www.anthropic.com/rss.xml",
+        "category": "écosystème",
+        "keywords": ["agent", "coding", "claude", "specification", "workflow", "mcp"],
+        "strate": 4,
+    },
     {
         "id": "fowler-bliki",
         "name": "Martin Fowler — Bliki",
@@ -29,30 +113,183 @@ DEFAULT_SOURCES: list[dict] = [
         "url": "https://martinfowler.com/feed.atom",
         "category": "sdd-mode",
         "keywords": ["spec", "sdd", "agentic", "ai", "agent", "specification"],
+        "strate": 4,
     },
     {
-        "id": "anthropic-news",
-        "name": "Anthropic — News",
-        "type": "rss",
-        "url": "https://www.anthropic.com/rss.xml",
-        "category": "écosystème",
-        "keywords": ["agent", "coding", "claude", "specification", "workflow"],
-    },
-    {
-        "id": "github-kiro",
-        "name": "AWS Kiro — Releases",
-        "type": "github_releases",
-        "url": "https://api.github.com/repos/aws/kiro/releases",
-        "category": "sdd-mode",
-        "keywords": [],
-    },
-    {
-        "id": "tessl-changelog",
+        "id": "tessl-blog",
         "name": "Tessl — Blog",
         "type": "web",
         "url": "https://tessl.io/blog",
         "category": "sdd-mode",
         "keywords": ["spec", "agent", "sdd", "specification"],
+        "strate": 4,
+    },
+    {
+        "id": "github-kiro",
+        "name": "AWS Kiro — Changelog",
+        "type": "web",
+        "url": "https://kiro.dev/changelog/",
+        "category": "sdd-mode",
+        "keywords": [],
+        "strate": 4,
+    },
+    {
+        "id": "github-speckit",
+        "name": "GitHub Spec Kit — Releases",
+        "type": "github_releases",
+        "url": "https://api.github.com/repos/github/spec-kit/releases",
+        "category": "sdd-mode",
+        "keywords": [],
+        "strate": 4,
+    },
+    {
+        "id": "mcp-spec",
+        "name": "Model Context Protocol — Spec & Updates",
+        "type": "github_releases",
+        "url": "https://api.github.com/repos/modelcontextprotocol/specification/releases",
+        "category": "écosystème",
+        "keywords": [],
+        "strate": 4,
+    },
+    {
+        "id": "openai-blog",
+        "name": "OpenAI — Blog",
+        "type": "rss",
+        "url": "https://openai.com/blog/rss.xml",
+        "category": "écosystème",
+        "keywords": ["agent", "codex", "spec", "coding", "agentic"],
+        "strate": 4,
+    },
+
+    # ── Strate 5 — Recherche (signal avancé) ─────────────────────────────────
+    {
+        "id": "arxiv-cs-ai",
+        "name": "arXiv — cs.AI (Agents & Software Engineering)",
+        "type": "rss",
+        "url": "https://rss.arxiv.org/rss/cs.AI",
+        "category": "framework",
+        "keywords": [
+            "agent", "specification", "software engineering",
+            "context", "spec-driven", "llm agent",
+        ],
+        "strate": 5,
+    },
+    {
+        "id": "arxiv-cs-se",
+        "name": "arXiv — cs.SE (Software Engineering)",
+        "type": "rss",
+        "url": "https://rss.arxiv.org/rss/cs.SE",
+        "category": "sdd-mode",
+        "keywords": ["agent", "specification", "llm", "code generation", "context"],
+        "strate": 5,
+    },
+    {
+        "id": "huggingface-papers",
+        "name": "Hugging Face — Daily Papers",
+        "type": "rss",
+        "url": "https://huggingface.co/blog/feed.xml",
+        "category": "écosystème",
+        "keywords": ["agent", "coding", "specification", "context", "software"],
+        "strate": 5,
+    },
+
+    # ── Strate 6 — Communautés (signaux faibles) ─────────────────────────────
+    {
+        "id": "hackernews",
+        "name": "Hacker News — Front Page",
+        "type": "rss",
+        "url": "https://news.ycombinator.com/rss",
+        "category": "écosystème",
+        "keywords": [
+            "spec-driven", "sdd", "agentic", "claude code", "cursor",
+            "specification", "context engineering", "kiro", "mcp",
+        ],
+        "strate": 6,
+    },
+    {
+        "id": "reddit-claudeai",
+        "name": "Reddit — r/ClaudeAI",
+        "type": "rss",
+        "url": "https://www.reddit.com/r/ClaudeAI/.rss",
+        "category": "écosystème",
+        "keywords": ["spec", "agent", "workflow", "coding", "context"],
+        "strate": 6,
+    },
+    {
+        "id": "reddit-experienced-devs",
+        "name": "Reddit — r/ExperiencedDevs",
+        "type": "rss",
+        "url": "https://www.reddit.com/r/ExperiencedDevs/.rss",
+        "category": "framework",
+        "keywords": ["ai", "agent", "spec", "specification", "workflow", "agentic"],
+        "strate": 6,
+    },
+    {
+        "id": "github-claudecode",
+        "name": "GitHub — Claude Code Releases",
+        "type": "github_releases",
+        "url": "https://api.github.com/repos/anthropics/claude-code/releases",
+        "category": "écosystème",
+        "keywords": [],
+        "strate": 6,
+    },
+
+    # ── Strate 7 — Écosystème FR & Gouvernance (signal local) ────────────────
+    {
+        "id": "cnil-blog",
+        "name": "CNIL — Blog (RGPD & IA)",
+        "type": "rss",
+        "url": "https://www.cnil.fr/fr/rss.xml",
+        "category": "gouvernance",
+        "keywords": ["ia", "intelligence artificielle", "rgpd", "ai act", "données"],
+        "strate": 7,
+    },
+    {
+        "id": "eu-aiact",
+        "name": "EU AI Act — Tracker",
+        "type": "web",
+        "url": "https://artificialintelligenceact.eu/",
+        "category": "gouvernance",
+        "keywords": ["ai act", "regulation", "compliance", "high-risk", "omnibus"],
+        "strate": 7,
+    },
+    {
+        "id": "infoq-fr",
+        "name": "InfoQ France",
+        "type": "rss",
+        "url": "https://www.infoq.com/fr/feed/",
+        "category": "framework",
+        "keywords": ["agent", "ia", "spécification", "architecture", "agilité"],
+        "strate": 7,
+    },
+
+    # ── Strate 8 — Voix longues (signal philosophique) ───────────────────────
+    {
+        "id": "kent-beck",
+        "name": "Kent Beck — Substack",
+        "type": "rss",
+        "url": "https://tidyfirst.substack.com/feed",
+        "category": "constitution",
+        "keywords": ["ai", "agent", "human", "software", "design", "intent"],
+        "strate": 8,
+    },
+    {
+        "id": "pluralistic",
+        "name": "Cory Doctorow — Pluralistic",
+        "type": "rss",
+        "url": "https://pluralistic.net/feed/",
+        "category": "constitution",
+        "keywords": ["ai", "tech", "governance", "human", "autonomy"],
+        "strate": 8,
+    },
+    {
+        "id": "thoughtworks-radar",
+        "name": "ThoughtWorks — Technology Radar",
+        "type": "web",
+        "url": "https://www.thoughtworks.com/radar",
+        "category": "sdd-mode",
+        "keywords": ["specification", "agent", "ai", "adopt", "trial"],
+        "strate": 8,
     },
 ]
 
