@@ -20,23 +20,25 @@ from pathlib import Path
 from rich.console import Console
 
 from ..config import (
-    HYPOTHESES_PENDING,
     HYPOTHESES_DEFERRED,
     HYPOTHESES_GO,
     HYPOTHESES_NOGO,
-    SIGNALS_SCORED,
+    HYPOTHESES_PENDING,
     SIGNALS_ARCHIVED,
-    RELEASES,
+    SIGNALS_SCORED,
 )
 from ..models import Decision
-from ..parser import parse_hypothesis
+from ..parser import SCORE_RE, format_score, parse_hypothesis
 
 console = Console()
 
 
 def _apply_decision_to_file(path: Path, decision: Decision, comment: str, cycle: str) -> str:
-    """Met à jour le fichier hypothèse avec la décision du Gardien."""
+    """Met à jour le fichier hypothèse avec la décision (Gardien ou règle déléguée)."""
     content = path.read_text(encoding="utf-8")
+
+    # Une hypothèse reportée repasse en décision : on repart de cases vides.
+    content = re.sub(r"\[[xX]\] (GO|NO GO|DEFER)", r"[ ] \1", content)
 
     # Cocher la bonne case
     if decision == Decision.GO:
@@ -46,26 +48,36 @@ def _apply_decision_to_file(path: Path, decision: Decision, comment: str, cycle:
     elif decision == Decision.DEFER:
         content = re.sub(r"\[ \] DEFER", "[x] DEFER", content)
 
-    # Remplir la section Décision
-    content = re.sub(
-        r"## Décision du Gardien\n\*\*Date\*\* :\n\*\*Commentaire\*\* :",
-        f"## Décision du Gardien\n**Date** : {cycle}\n**Commentaire** : {comment}",
-        content,
+    # Remplir la section Décision (gabarit vierge), sinon y ajouter une entrée datée
+    blank = re.compile(
+        r"## Décision du Gardien\n\*\*Date\*\* :[ \t]*\n\*\*Commentaire\*\* :[ \t]*(?=\n|\Z)"
     )
+    filled = f"## Décision du Gardien\n**Date** : {cycle}\n**Commentaire** : {comment}"
+    if blank.search(content):
+        content = blank.sub(lambda _: filled, content, count=1)
+    elif "## Décision du Gardien" in content:
+        header = "## Décision du Gardien\n"
+        content = content.replace(
+            header,
+            f"{header}**Date** : {cycle}\n**Commentaire** : {comment}\n\n**Décision antérieure**\n",
+            1,
+        )
+    else:
+        content = content.rstrip("\n") + f"\n\n{filled}\n"
 
     return content
 
 
-def _bump_defer_score(path: Path) -> None:
-    """Augmente le score d'une hypothèse DEFER de +2."""
+def _bump_defer_score(path: Path, bonus: float = 2) -> None:
+    """Augmente le score d'une hypothèse DEFER de `bonus` points (plafond 20)."""
+    if not bonus:
+        return
     content = path.read_text(encoding="utf-8")
-    m = re.search(r"\*\*Total\*\*\s*:\s*(\d+)/20", content)
+    m = SCORE_RE.search(content)
     if m:
-        old_score = int(m.group(1))
-        new_score = min(old_score + 2, 20)
-        content = content.replace(
-            f"**Total** : {old_score}/20", f"**Total** : {new_score}/20"
-        )
+        old_score = float(m.group(1).replace(",", "."))
+        new_score = min(old_score + bonus, 20)
+        content = content[: m.start(1)] + format_score(new_score) + content[m.end(1) :]
         path.write_text(content, encoding="utf-8")
 
 
@@ -86,7 +98,7 @@ def _generate_implementation_plan(
         lines += [
             f"### T{i} — {hyp.id} : {hyp.title}",
             f"**Composante** : {hyp.component}",
-            f"**Score** : {hyp.score}/20",
+            f"**Score** : {format_score(hyp.score)}/20",
             "",
             "**Modification proposée** :",
             hyp.proposed_modification,
@@ -130,6 +142,9 @@ def run_validate(decisions_file: Path, dry_run: bool = False) -> None:
     data = json.loads(decisions_file.read_text(encoding="utf-8"))
     cycle = data["cycle"]
     decisions_raw = data["decisions"]
+    # Bonus de report : +2 pour un DEFER du Gardien (défaut historique), 0 en mode
+    # automatique (un report sans décision humaine ne doit pas mener seul au GO).
+    defer_bonus = float(data.get("defer_bonus", 2))
 
     console.print(f"[bold]ALIS Validate[/bold] — cycle [cyan]{cycle}[/cyan]")
     console.print(f"{len(decisions_raw)} décisions à appliquer")
@@ -148,7 +163,6 @@ def run_validate(decisions_file: Path, dry_run: bool = False) -> None:
 
     for dec in decisions_raw:
         hyp_id = dec["id"]
-        decision_str = dec["decision"].upper().replace(" ", "_")
         comment = dec.get("comment", "")
 
         # Trouver le fichier dans pending/
@@ -183,10 +197,11 @@ def run_validate(decisions_file: Path, dry_run: bool = False) -> None:
             label = "[red]NO GO →nogo/[/red]"
         else:  # DEFER
             dest = HYPOTHESES_DEFERRED / src.name
-            _bump_defer_score(src)
-            label = "[yellow]DEFER →deferred/ (+2)[/yellow]"
+            _bump_defer_score(src, defer_bonus)
+            label = f"[yellow]DEFER →deferred/ (+{defer_bonus:g})[/yellow]"
 
-        shutil.move(str(src), str(dest))
+        if src.resolve() != dest.resolve():
+            shutil.move(str(src), str(dest))
         console.print(f"  {hyp_id} → {label}")
 
     # Archiver les signaux scored
@@ -197,11 +212,10 @@ def run_validate(decisions_file: Path, dry_run: bool = False) -> None:
 
     # Générer le plan d'implémentation
     if go_hyps:
-        plan_path = RELEASES.parent / f"IMPLEMENTATION-CYCLE-{cycle}.md"
-        RELEASES.mkdir(parents=True, exist_ok=True)
-        # Plan dans le dossier alis/ racine
+        # Plan dans le dossier alis/ racine — jamais écrasé (le suivi d'implémentation y vit)
         plan_path = HYPOTHESES_GO.parent.parent / f"IMPLEMENTATION-CYCLE-{cycle}.md"
-        _generate_implementation_plan(go_hyps, cycle, plan_path)
+        if not plan_path.exists():
+            _generate_implementation_plan(go_hyps, cycle, plan_path)
         console.print(f"[green]✓ Plan d'implémentation : {plan_path.name}[/green]")
 
     console.print(

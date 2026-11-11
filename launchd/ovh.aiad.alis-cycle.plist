@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ovh.aiad.alis-cycle</string>
+
+    <!-- Lancé via ALIS.app : macOS attribue l'accès Google Drive à « ALIS »
+         (un job launchd nu se voit refuser la lecture du Drive). -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/open</string>
+        <string>-W</string>
+        <string>-n</string>
+        <string>-a</string>
+        <string>/Users/steeve/Dev/repos/alis/launcher/ALIS.app</string>
+        <string>--args</string>
+        <string>cycle</string>
+    </array>
+
+    <!-- Tous les jours à 08h30 : bin/alis-cycle ne fait rien tant que le cycle
+         (cadence fixe de 28 jours, state/cycle.json) n'est pas dû. Le passage
+         quotidien rattrape un jour de cycle où la machine était éteinte et
+         reprend un cycle interrompu. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>8</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/steeve/Dev/repos/alis/logs/cycle-launchd.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/steeve/Dev/repos/alis/logs/cycle-launchd.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

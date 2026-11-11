@@ -1,192 +1,174 @@
 # ALIS — Guide Opérationnel du Gardien
 
-*Ce document décrit ce qui est automatisé, ce qui reste manuel, et exactement quoi faire à chaque étape du cycle lunaire.*
+*Ce qui est automatisé, ce qui te reste, et quoi faire quand quelque chose bloque.*
+*Mis à jour le 11 novembre 2026 : cycle entièrement automatisé, cadence fixe de 28 jours.*
 
 ---
 
 ## Vue d'ensemble
 
-ALIS automatise les tâches d'exécution du cycle. **Une seule chose reste ta responsabilité exclusive : la décision GO / NO GO / DEFER.**
+Depuis le 11 novembre 2026, le cycle tourne sans toi de bout en bout. Tu as fixé la règle ; l'outillage l'applique.
 
 ```
-AUTOMATIQUE                          MANUEL (toi)
-──────────────────────────────────────────────────────────────
-Lundi     → collecte des signaux
-Mercredi  → scoring + hypothèses
-Samedi    → briefing Guardian       → Session 45 min
-                                    → Remplir DECISIONS-*.json
-                                    → alis validate
-                                    → Valider release notes
-                                    → alis release
-                                    → Publier (LinkedIn/Discord/X)
+AUTOMATIQUE                                     TOI (facultatif)
+────────────────────────────────────────────────────────────────────────
+Lundi (hebdo)     collecte des signaux
+Mercredi (hebdo)  scoring + hypothèses
+Samedi J-2        briefing de préavis          → infirmer / forcer une décision
+Lundi du cycle    décision (règle > 14/20)       (decisions/OVERRIDES-<cycle>.json)
+  08h30           implémentation du corpus
+                  publication de la doctrine
+                  brouillons de communication   → publier LinkedIn / Discord / X
+                  site aiad.ovh mis à jour
+                  aiad-sdd publié sur npm
+                  rapport de cycle + notification
 ```
+
+Le cycle revient **tous les 28 jours**, toujours un lundi : 23 novembre 2026, 21 décembre 2026, 18 janvier 2027…
 
 ---
 
-## Ce qui tourne automatiquement
+## La règle de décision
 
-Trois agents macOS (`launchd`) s'exécutent en arrière-plan via ton compte Claude Max — **aucun coût API**.
+Tu l'as adoptée le 11 novembre 2026. Elle est codée dans `src/alis/commands/decide.py` et testée dans `tests/test_decide.py`.
 
-| Agent | Quand | Ce qu'il fait |
-|-------|-------|---------------|
-| `alis-collect` | Lundi 07h00 | Surveille Fowler, Anthropic, Tessl, Kiro, EU AI Act. Écrit les signaux pertinents dans `signals/inbox/` |
-| `alis-score` | Mercredi 07h00 | Score chaque signal sur 4 dimensions (/20). Les signaux ≥ 12/20 deviennent des hypothèses dans `hypotheses/pending/` |
-| `alis-briefing` | Samedi 07h00 | Si la pleine lune est dans ≤ 5 jours : génère `briefings/BRIEFING-*.md` et le dépose dans ton dossier ALIS |
+| Cas | Décision |
+|-----|----------|
+| Tu as déposé une décision explicite (`OVERRIDES`) | appliquée telle quelle, dans les deux sens |
+| L'hypothèse touche la Constitution ou les valeurs fondatrices | **retenue** : jamais décidée automatiquement |
+| Score **strictement supérieur à 14/20** | **GO** |
+| Score ≤ 14/20, premier passage | DEFER (sans bonus de +2) |
+| Score ≤ 14/20, déjà reportée | NO GO par péremption |
 
-> **Prérequis** : ton Mac doit être allumé aux horaires indiqués. Si la machine est éteinte, launchd ne rattrape pas les exécutions manquées — lance manuellement si besoin (voir section Commandes).
+Le seuil se règle par `ALIS_AUTO_GO_ABOVE` dans `.env` (défaut : 14).
 
----
+### Infirmer ou forcer une décision
 
-## Le cycle complet mois par mois
-
-### Semaine 1–3 (continu)
-Rien à faire. Les agents collectent et scorent en arrière-plan.
-Tu peux consulter `alis status` à tout moment pour voir où en est le cycle.
-
-### J-3 avant la pleine lune (samedi matin)
-L'agent `alis-briefing` dépose automatiquement :
-```
-AIAD/06_AGENTS/alis/briefings/BRIEFING-YYYY-MM-DD.md
-```
-Tu reçois ce fichier dans ton Google Drive.
-
-### Jour J — La pleine lune (session de 45 min)
-
-**1. Lire le briefing**
-Ouvre `briefings/BRIEFING-YYYY-MM-DD.md`. Il contient :
-- Les hypothèses classées par score (priorité haute ≥ 16, moyenne 12–15)
-- La justification terrain pour chacune
-- La recommandation de l'agent (GO / DEFER)
-- Les signaux sous le seuil (pour information)
-
-**2. Prendre tes décisions**
-Crée le fichier `DECISIONS-YYYY-MM-DD.json` (remplace la date par celle de la pleine lune) :
+Avant le jour du cycle, crée dans le Drive `06_AGENTS/alis/decisions/OVERRIDES-<date du cycle>.json` :
 
 ```json
 {
-  "cycle": "2026-05-01",
   "decisions": [
-    {
-      "id": "HYP-2026-04-28-001",
-      "decision": "GO",
-      "comment": "Validé — les signaux terrain sont convergents."
-    },
-    {
-      "id": "HYP-2026-04-28-002",
-      "decision": "NO GO",
-      "comment": "Trop tôt — attendre la sortie finale de l'Omnibus VII."
-    },
-    {
-      "id": "HYP-2026-04-28-003",
-      "decision": "DEFER",
-      "comment": "Pertinent mais pas urgent ce cycle."
-    }
+    {"id": "HYP-2026-11-11-002", "decision": "NO GO", "comment": "Trop tôt."},
+    {"id": "HYP-2026-10-14-002", "decision": "GO", "comment": "Je la veux dans ce cycle."}
   ]
 }
 ```
 
-Les valeurs acceptées pour `decision` : `GO`, `NO GO`, `DEFER`.
+Valeurs acceptées : `GO`, `NO GO`, `DEFER`. C'est aussi le seul moyen de faire avancer une hypothèse retenue.
 
-**3. Valider le cycle**
+Pour voir ce que la règle déciderait aujourd'hui, sans rien écrire :
+
 ```bash
-cd ~/Dev/repos/alis
-alis validate DECISIONS-2026-05-01.json
+cd ~/Dev/repos/alis && bin/alis-cycle --dry-run
 ```
 
-Ce que ça fait automatiquement :
-- Déplace les hypothèses dans `go/`, `nogo/`, `deferred/`
-- Archive les signaux de `scored/` vers `archived/`
-- Génère `IMPLEMENTATION-CYCLE-*.md` pour les GO
-- Augmente le score des DEFER de +2 pour le prochain cycle
+---
 
-### J+1 — Implémentation
-Consulte `IMPLEMENTATION-CYCLE-YYYY-MM-DD.md` pour la liste des modifications à apporter aux artefacts AIAD. L'agent peut t'aider à les rédiger — **la validation finale reste la tienne avant tout commit**.
+## Ce qui tourne
 
-### J+2 — Communication
+Quatre agents macOS (`launchd`), via ton compte Claude Max.
 
-**Générer les drafts :**
-```bash
-alis release --cycle 2026-05-01
-```
+| Agent | Quand | Ce qu'il fait |
+|-------|-------|---------------|
+| `ovh.aiad.alis-collect` | Lundi 07h00 | Collecte les signaux dans `signals/inbox/` |
+| `ovh.aiad.alis-score` | Mercredi 07h00 | Score les signaux ; ≥ 12/20 → hypothèse dans `hypotheses/pending/` |
+| `ovh.aiad.alis-briefing` | Samedi 07h00 | À 5 jours ou moins du cycle : briefing de préavis dans `briefings/` |
+| `ovh.aiad.alis-cycle` | Tous les jours 08h30 | Ne fait rien tant que le cycle n'est pas dû ; le jour venu, déroule tout le cycle |
 
-Produit dans `releases/` :
-- `RELEASE-2026-05-01.md` — release notes complètes
-- `LINKEDIN-2026-05-01.md` — post LinkedIn (800–1200 caractères)
-- `DISCORD-2026-05-01.md` — annonce Discord
-- `THREAD-X-2026-05-01.md` — thread X (5–7 tweets)
+Le passage quotidien d'`alis-cycle` sert de rattrapage : si le Mac était éteint le lundi du cycle, le cycle part le lendemain, sans décaler les suivants.
 
-> ⚠️ **Valide chaque contenu avant de publier.** L'agent rédige, toi tu autorises.
+### Les étapes du cycle (`bin/alis-cycle`)
+
+| Étape | Nature | Ce qu'elle fait |
+|-------|--------|-----------------|
+| `preflight` | script | Outils, accès Google Drive, session Claude, GitHub, npm |
+| `decide` | script | Applique la règle → `decisions/DECISIONS-<cycle>.json` |
+| `validate` | script | Range les hypothèses (go / nogo / deferred), archive les signaux |
+| `implement` | agent borné | Rédige les GO dans le corpus, vérifie les sources, publie la doctrine (`published/`) |
+| `communication` | agent borné | Brouillons release notes / LinkedIn / Discord / X (non bloquant) |
+| `sdd-prepare` | script | Clone propre de `sdd-mode`, `npm ci`, `sync-doctrine` depuis `published/md` |
+| `site` | agent borné | Aligne `site/` (FR + EN) et les templates, committe en local |
+| `release` | script | `release.js minor`, mêmes gates que la CI, puis **push de `main` et du tag** |
+| `verify` | script | Attend les workflows `Release` et `site-deploy`, contrôle npm et le site |
+| `close` | script | Rapport `releases/CYCLE-REPORT-<cycle>.md`, planifie le cycle suivant |
+
+**Séparation des pouvoirs.** Les agents de rédaction tournent avec une liste blanche d'outils : ils éditent des fichiers et committent en local, mais `git push`, `git tag`, `npm publish` et `gh release` leur sont refusés. Seul le script publie, après les contrôles. Un agent en échec écrit `"status": "failed"` et rien n'est publié.
+
+**Reprise.** Chaque étape pose un marqueur dans `state/runs/<cycle>/`. Après un échec, le passage du lendemain reprend à l'étape en échec. Après 3 tentatives, le cycle s'arrête et te notifie.
+
+---
+
+## Ce qui te reste
+
+- **Publier la communication** : les brouillons sont dans `releases/` ; rien ne part sur LinkedIn, Discord ou X sans toi.
+- **Les hypothèses retenues** (Constitution, valeurs fondatrices) : listées dans le briefing et le rapport de cycle.
+- **Les évolutions logicielles** du package : le cycle ouvre une issue sur `sdd-mode` ; elles suivent Intent → SPEC → Gate.
+- **Trois prérequis à tenir** :
+  1. **Mac allumé** et session ouverte autour de 08h30 (sinon rattrapage au prochain passage).
+  2. **Accès Google Drive pour « ALIS »** : accordé une fois (boîte de dialogue macOS, ou Réglages Système → Confidentialité et sécurité → Fichiers et dossiers → ALIS). À redonner si `launcher/build.sh` est relancé.
+  3. **Session Claude valide** : une connexion `claude auth login` expire. Pour des jobs sans surveillance, préfère `claude setup-token` (jeton longue durée). `alis-cycle` te prévient dans la semaine qui précède si la session expire avant le cycle.
+- Le secret GitHub **`NPM_TOKEN`** du dépôt `sdd-mode` doit rester valide (publication npm par `release.yml`).
 
 ---
 
 ## Commandes à connaître
 
-### Quotidien / Vérification
 ```bash
-alis status          # État du cycle : signaux, hypothèses, prochaine pleine lune
+cd ~/Dev/repos/alis
+
+bin/alis-cycle --status      # date du prochain cycle, étapes faites, tentatives
+bin/alis-cycle --dry-run     # décisions que la règle prendrait, sans rien écrire
+uv run alis status           # signaux et hypothèses en stock
+
+tail -f logs/cycle.log       # journal du cycle (étapes, gates, publication)
+tail -f logs/cycle-implement.log logs/cycle-site.log   # journaux des agents de rédaction
 ```
 
-### Lancer manuellement un agent (si Mac était éteint)
+### Lancer ou relancer le cycle à la main
+
+Toujours via l'app, pour avoir l'accès Google Drive :
+
 ```bash
-launchctl start ovh.aiad.alis-collect     # Collecte
-launchctl start ovh.aiad.alis-score       # Scoring
-launchctl start ovh.aiad.alis-briefing    # Briefing
+open -W -n -a ~/Dev/repos/alis/launcher/ALIS.app --args cycle            # comme launchd : rien si non dû
+open -W -n -a ~/Dev/repos/alis/launcher/ALIS.app --args cycle --force    # force le cycle courant / relance après blocage
 ```
 
-### Voir ce qui se passe
+Depuis un terminal qui a déjà accès au Drive, `bin/alis-cycle --force` marche aussi.
+
+### Changer la date du prochain cycle
+
 ```bash
-tail -f ~/Dev/repos/alis/logs/collect-stdout.log
-tail -f ~/Dev/repos/alis/logs/score-stdout.log
-tail -f ~/Dev/repos/alis/logs/briefing-stdout.log
+uv run alis cycle-init --next 2026-12-21
 ```
 
-### Après la session Guardian
+### Suspendre l'automatisation
+
 ```bash
-alis validate DECISIONS-YYYY-MM-DD.json  # Appliquer les décisions
-alis release --cycle YYYY-MM-DD          # Générer la communication
+launchctl bootout gui/$(id -u)/ovh.aiad.alis-cycle        # suspendre
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ovh.aiad.alis-cycle.plist   # reprendre
 ```
 
-### En cas de problème
+### Vérifier l'accès Google Drive du lanceur
+
 ```bash
-launchctl list | grep aiad               # Voir l'état des 3 agents
-launchctl list ovh.aiad.alis-collect     # Détail d'un agent (LastExitStatus)
+open -W -n -a ~/Dev/repos/alis/launcher/ALIS.app --args probe; cat ~/Dev/repos/alis/logs/probe.log   # DRIVE_READ=ok attendu
 ```
 
 ---
 
-## Structure des dossiers ALIS
+## En cas d'échec
 
-```
-AIAD/06_AGENTS/alis/
-├── signals/
-│   ├── inbox/        ← Signaux bruts (lundi → mercredi)
-│   ├── scored/       ← Signaux analysés (mercredi → pleine lune)
-│   └── archived/     ← Signaux traités (après validate)
-├── hypotheses/
-│   ├── pending/      ← En attente de ta décision
-│   ├── go/           ← Approuvées
-│   ├── nogo/         ← Rejetées (avec justification)
-│   └── deferred/     ← Reportées (score +2 au prochain cycle)
-├── briefings/        ← BRIEFING-*.md (généré J-3)
-├── releases/         ← RELEASE, LINKEDIN, DISCORD, THREAD-X
-└── templates/        ← Formats de référence (ne pas modifier)
-```
+Tu reçois une notification macOS « ALIS — cycle … en échec » avec l'étape. Ensuite :
 
----
+1. `bin/alis-cycle --status` puis `tail -50 logs/cycle.log`.
+2. Corrige la cause (accès Drive, session Claude, gate en échec, `NPM_TOKEN` expiré…).
+3. Laisse le passage du lendemain reprendre, ou relance avec `--force`.
 
-## Dates de pleine lune 2026
-
-| Date | J-3 (briefing) | Session Guardian |
-|------|---------------|-----------------|
-| 1er mai 2026 | 28 avril | 1er mai |
-| 31 mai 2026 | 28 mai | 31 mai |
-| 30 juin 2026 | 27 juin | 30 juin |
-| 29 juillet 2026 | 26 juillet | 29 juillet |
-| 28 août 2026 | 25 août | 28 août |
-| 27 septembre 2026 | 24 septembre | 27 septembre |
-| 26 octobre 2026 | 23 octobre | 26 octobre |
-| 25 novembre 2026 | 22 novembre | 25 novembre |
-| 25 décembre 2026 | 22 décembre | 25 décembre |
+Cas particuliers :
+- **Échec à `release` avant le push** : rien n'est publié ; le clone `work/sdd-mode` garde les commits locaux.
+- **Échec à `verify`** : `main` et le tag sont déjà poussés. Regarde `gh run list --repo everssteeve/sdd-mode` ; une fois le workflow relancé avec succès, le passage suivant valide et clôt le cycle.
+- **Revenir sur une doctrine publiée** : chaque fichier modifié a sa copie dans le dossier `archives/` voisin (`<nom>-<cycle>.md`).
 
 ---
 
@@ -194,24 +176,27 @@ AIAD/06_AGENTS/alis/
 
 | Fichier | Rôle |
 |---------|------|
-| `~/Dev/repos/alis/.env` | Clé API Anthropic (pour les commandes manuelles) |
-| `~/Dev/repos/alis/routines/routine-collect.md` | Prompt de l'agent de collecte |
-| `~/Dev/repos/alis/routines/routine-score.md` | Prompt de l'agent de scoring |
-| `~/Dev/repos/alis/routines/routine-briefing.md` | Prompt de l'agent de briefing |
-| `~/Library/LaunchAgents/ovh.aiad.alis-*.plist` | Configuration des agents macOS |
+| `bin/alis-cycle` | Orchestrateur du cycle |
+| `routines/routine-implement.md`, `routine-site.md`, `routine-release.md` | Consignes des agents de rédaction |
+| `routines/routine-collect.md`, `routine-score.md`, `routine-briefing.md` | Consignes des agents hebdomadaires |
+| `src/alis/commands/decide.py`, `src/alis/cycle.py` | Règle de décision, cadence de 28 jours |
+| `state/cycle.json` | Date du prochain cycle, historique (local, hors Drive) |
+| `state/runs/<cycle>/` | Marqueurs d'étapes et résultats d'un cycle |
+| `launcher/ALIS.app` | Lanceur natif : donne aux jobs launchd l'accès Google Drive |
+| `launchd/ovh.aiad.alis-cycle.plist` | Copie de référence de l'agent quotidien |
+| `work/sdd-mode/` | Clone dédié du dépôt `sdd-mode` (jamais ton clone de travail) |
 
 ---
 
-## Ce qu'ALIS ne fera jamais sans toi
+## Ce qu'ALIS ne fait toujours pas sans toi
 
-- Modifier un artefact AIAD sans ta validation
-- Décider GO / NO GO / DEFER à ta place
-- Publier du contenu sur LinkedIn, Discord ou X
-- Modifier les valeurs fondatrices ou la Constitution AIAD
+- Décider d'une hypothèse qui touche la Constitution ou les valeurs fondatrices
+- Publier sur LinkedIn, Discord ou X
+- Modifier la règle de décision ou le seuil
+- Écrire du code dans `lib/` ou `bin/` du package sans passer par Intent → SPEC → Gate
 
-*L'agent prépare. Le Gardien décide.*
+*Tu fixes la règle. L'outillage l'applique. Tu peux la reprendre à tout moment.*
 
 ---
 
-*Généré le 24 avril 2026 — Projet ALIS v0.1.0*
 *Dépôt : `/Users/steeve/Dev/repos/alis`*

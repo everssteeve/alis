@@ -1,0 +1,475 @@
+#!/bin/bash
+# ALIS — Cycle complet automatisé (cadence fixe de 28 jours).
+#
+# Lancé chaque jour par launchd via ALIS.app (accès Google Drive). Ne fait rien
+# tant que le cycle n'est pas dû (`alis cycle-status`). Le jour du cycle :
+#
+#   preflight → decide → validate → implement → communication
+#             → sdd-prepare → site → release → verify → close
+#
+# Chaque étape pose un marqueur `state/runs/<cycle>/<étape>.done` : après un
+# échec, l'exécution suivante reprend à l'étape en échec (3 tentatives, puis
+# intervention requise).
+#
+# Séparation des pouvoirs :
+#   - les étapes de rédaction tournent en `claude -p` avec des permissions
+#     BORNÉES (liste blanche d'outils par étape, jamais de contournement des
+#     permissions ; push, tag et publication leur sont interdits) ;
+#   - tout ce qui publie (git push, tag → npm via GitHub Actions) est fait ici,
+#     de façon déterministe, après les mêmes gates que la CI.
+#
+# Usage :
+#   bin/alis-cycle              exécution normale (ne fait rien si non dû)
+#   bin/alis-cycle --force      lance le cycle courant même s'il n'est pas dû
+#   bin/alis-cycle --dry-run    décisions simulées, aucune écriture
+#   bin/alis-cycle --status     affiche l'état du cycle et des étapes
+#
+# Accord du Gardien (2026-11-11) : GO automatique si score > 14/20, mise à jour
+# automatique du site aiad.ovh et publication automatique d'aiad-sdd sur npm.
+
+set -uo pipefail
+
+REPO="/Users/steeve/Dev/repos/alis"
+AIAD="/Users/steeve/Library/CloudStorage/GoogleDrive-evers.steeve@gmail.com/Mon Drive/AIAD"
+ALIS_DIR="$AIAD/06_AGENTS/alis"
+DOCTRINE_SOURCE="$AIAD/published/md"
+SDD="$REPO/work/sdd-mode"
+SDD_SLUG="everssteeve/sdd-mode"
+SDD_REMOTE="https://github.com/$SDD_SLUG.git"
+NPM_PACKAGE="aiad-sdd"
+CLAUDE="${ALIS_CLAUDE:-/Users/steeve/.local/bin/claude}"
+LOG="$REPO/logs/cycle.log"
+MAX_ATTEMPTS=3
+LLM_TIMEOUT_S=14400      # 4 h par étape de rédaction
+CI_TIMEOUT_S=2400        # 40 min pour les workflows GitHub
+
+export HOME="/Users/steeve"
+export PATH="/Users/steeve/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+export NO_COLOR=1
+
+# Permissions des agents de rédaction : édition de fichiers dans leur répertoire
+# de travail + commandes listées. Tout le reste est refusé (mode non interactif).
+# Listes séparées par des virgules : une règle peut contenir des espaces.
+DENY_TOOLS="Bash(git push:*),Bash(git tag:*),Bash(git reset:*),Bash(git rebase:*),Bash(git remote:*),Bash(npm publish:*),Bash(npm version:*),Bash(gh release:*),Bash(gh workflow:*),Bash(gh secret:*),Bash(gh repo:*),Bash(gh api:*),Bash(rm -rf:*),Bash(sudo:*),Bash(curl:*),Bash(launchctl:*)"
+ALLOW_COMMON="Read,Edit,Write,Glob,Grep,WebFetch,WebSearch,Skill,Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(grep:*),Bash(find:*),Bash(diff:*),Bash(mkdir:*),Bash(cp:*),Bash(mv:*),Bash(stat:*),Bash(date:*)"
+ALLOW_IMPLEMENT="$ALLOW_COMMON,Bash(python3 infrastructure/publish/convert.py:*),Bash(python infrastructure/publish/convert.py:*),Bash(python3 -m json.tool:*),Bash(pandoc:*)"
+ALLOW_COMMUNICATION="$ALLOW_COMMON"
+ALLOW_SITE="$ALLOW_COMMON,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git add:*),Bash(git commit:*),Bash(git restore:*),Bash(npm run:*),Bash(npm test:*),Bash(node:*),Bash(npx pa11y-ci:*),Bash(gh issue list:*),Bash(gh issue create:*)"
+
+FORCE=0; DRY_RUN=0; STATUS_ONLY=0
+for arg in "$@"; do
+  case "$arg" in
+    --force) FORCE=1 ;;
+    --dry-run) DRY_RUN=1 ;;
+    --status) STATUS_ONLY=1 ;;
+    *) echo "Option inconnue : $arg" >&2; exit 64 ;;
+  esac
+done
+
+mkdir -p "$REPO/logs" "$REPO/state/runs"
+
+log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" | tee -a "$LOG"; }
+
+notify() { # notify <titre> <message>
+  /usr/bin/osascript -e 'on run argv
+    display notification (item 2 of argv) with title (item 1 of argv)
+  end run' "$1" "$2" >/dev/null 2>&1 || true
+}
+
+with_timeout() { # with_timeout <secondes> <commande...>
+  perl -e 'alarm shift; exec @ARGV or die "exec: $!"' "$@"
+}
+
+alis() { (cd "$REPO" && uv run --quiet alis "$@"); }
+
+json_get() { # json_get <fichier> <expression python sur d>
+  python3 -c 'import json,sys
+d=json.load(open(sys.argv[1],encoding="utf-8"))
+v=eval(sys.argv[2])
+print(v if not isinstance(v,(list,dict)) else json.dumps(v,ensure_ascii=False))' "$1" "$2"
+}
+
+# ─── État du cycle ──────────────────────────────────────────────────────────
+
+STATUS="$(alis cycle-status)" || { log "✗ État du cycle illisible"; exit 1; }
+CYCLE="$(echo "$STATUS" | sed -n 's/^next_cycle=//p')"
+DUE="$(echo "$STATUS" | sed -n 's/^due=//p')"
+CADENCE="$(echo "$STATUS" | sed -n 's/^cadence_days=//p')"
+RUN="$REPO/state/runs/$CYCLE"
+NEXT_CYCLE="$(python3 -c 'import sys,datetime as d; print(d.date.fromisoformat(sys.argv[1])+d.timedelta(days=int(sys.argv[2])))' "$CYCLE" "$CADENCE")"
+CYCLE_MONTH="$(python3 -c 'import sys,datetime as d
+m=["janvier","février","mars","avril","mai","juin","juillet","août","septembre","octobre","novembre","décembre"]
+x=d.date.fromisoformat(sys.argv[1]); print(f"{m[x.month-1]} {x.year}")' "$CYCLE")"
+
+STEPS=(preflight decide validate implement communication sdd-prepare site release verify close)
+
+if [ "$STATUS_ONLY" = 1 ]; then
+  echo "$STATUS"
+  echo "run_dir=$RUN"
+  for s in "${STEPS[@]}"; do
+    if [ -f "$RUN/$s.done" ]; then echo "  ✓ $s"; else echo "  · $s"; fi
+  done
+  [ -f "$RUN/attempts" ] && echo "attempts=$(cat "$RUN/attempts")"
+  exit 0
+fi
+
+if [ "$DRY_RUN" = 1 ]; then
+  echo "Cycle $CYCLE (dû : $DUE) — simulation, aucune écriture"
+  alis decide --cycle "$CYCLE" --dry-run
+  exit $?
+fi
+
+claude_session_ok() { # claude_session_ok <date AAAA-MM-JJ> → 0 si la session Claude est valide ce jour-là
+  "$CLAUDE" auth status 2>/dev/null | python3 -c 'import json,sys,datetime as d
+try:
+    a = json.load(sys.stdin)
+except ValueError:
+    sys.exit(1)
+if not a.get("loggedIn"):
+    sys.exit(1)
+exp = a.get("loginExpiresAt")
+if exp:
+    day_end = d.datetime.fromisoformat(sys.argv[1] + "T23:59:59+00:00")
+    if d.datetime.fromisoformat(exp.replace("Z", "+00:00")) <= day_end:
+        sys.exit(1)' "$1"
+}
+
+if [ "$DUE" != "yes" ] && [ "$FORCE" != 1 ]; then
+  # Silencieux 27 jours sur 28. Dans la dernière semaine, prévient si la session
+  # Claude expire avant le jour du cycle (les étapes de rédaction échoueraient).
+  DAYS_UNTIL="$(echo "$STATUS" | sed -n 's/^days_until=//p')"
+  if [ "${DAYS_UNTIL:-99}" -le 7 ] && ! claude_session_ok "$CYCLE"; then
+    log "⚠ La session Claude expire avant le cycle du $CYCLE"
+    notify "ALIS — connexion Claude à renouveler" "Elle expire avant le cycle du $CYCLE : lancer « claude auth login » ou « claude setup-token »."
+  fi
+  exit 0
+fi
+
+# ─── Verrou et compteur de tentatives ───────────────────────────────────────
+
+LOCK="$REPO/state/cycle.lock"
+if ! mkdir "$LOCK" 2>/dev/null; then
+  if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +720 2>/dev/null)" ]; then
+    log "Verrou périmé (> 12 h) — repris"
+  else
+    log "Cycle déjà en cours (verrou $LOCK) — abandon"
+    exit 0
+  fi
+fi
+trap 'rmdir "$LOCK" 2>/dev/null' EXIT
+
+mkdir -p "$RUN"
+ATTEMPTS="$(cat "$RUN/attempts" 2>/dev/null || echo 0)"
+if [ "$ATTEMPTS" -ge "$MAX_ATTEMPTS" ] && [ "$FORCE" != 1 ]; then
+  log "✗ Cycle $CYCLE bloqué après $ATTEMPTS tentatives — intervention requise (bin/alis-cycle --status, puis --force)"
+  notify "ALIS — cycle $CYCLE bloqué" "$ATTEMPTS tentatives en échec. Voir logs/cycle.log puis relancer avec --force."
+  exit 1
+fi
+echo $((ATTEMPTS + 1)) > "$RUN/attempts"
+
+log "═══ Cycle $CYCLE — tentative $((ATTEMPTS + 1)) ═══"
+
+fail() { # fail <étape> <message>
+  log "✗ [$1] $2"
+  notify "ALIS — cycle $CYCLE en échec" "Étape $1 : $2"
+  exit 1
+}
+
+run_step() { # run_step <étape> <fonction>
+  local name="$1" fn="$2"
+  if [ -f "$RUN/$name.done" ]; then
+    log "· [$name] déjà fait"
+    return 0
+  fi
+  log "▶ [$name]"
+  "$fn" || fail "$name" "échec (voir $LOG)"
+  date '+%Y-%m-%d %H:%M:%S' > "$RUN/$name.done"
+  log "✓ [$name]"
+}
+
+render_prompt() { # render_prompt <routine> → stdout, substitue les {{VARIABLES}}
+  python3 - "$1" <<'PY'
+import os, re, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+def sub(m):
+    key = m.group(1)
+    if key not in os.environ:
+        sys.exit(f"variable de routine non définie : {key}")
+    return os.environ[key]
+sys.stdout.write(re.sub(r"\{\{([A-Z_]+)\}\}", sub, text))
+PY
+}
+
+run_writer() { # run_writer <cwd> <routine> <journal> <outils autorisés>
+  # Agent de rédaction à permissions bornées : édite les fichiers de <cwd> (et du
+  # dossier d'exécution pour son fichier de résultat), lance les seules commandes
+  # listées. Il ne peut ni pousser, ni taguer, ni publier.
+  local cwd="$1" routine="$2" out="$3" allow="$4" prompt
+  prompt="$(render_prompt "$routine")" || return 1
+  (cd "$cwd" && with_timeout "$LLM_TIMEOUT_S" "$CLAUDE" -p "$prompt" \
+      --permission-mode acceptEdits \
+      --add-dir "$RUN" \
+      --allowedTools "$allow" \
+      --disallowedTools "$DENY_TOOLS" < /dev/null) >> "$out" 2>&1
+}
+
+check_result() { # check_result <fichier json> → 0 si status == ok
+  local f="$1" st
+  [ -s "$f" ] || { log "  résultat absent : $f"; return 1; }
+  st="$(json_get "$f" 'd.get("status")')" || { log "  résultat illisible : $f"; return 1; }
+  if [ "$st" != "ok" ]; then
+    log "  statut « $st » : $(json_get "$f" 'd.get("reason","(sans raison)")')"
+    return 1
+  fi
+}
+
+# ─── Étapes ─────────────────────────────────────────────────────────────────
+
+step_preflight() {
+  local t
+  for t in uv python3 node npm git gh pandoc perl curl; do
+    command -v "$t" >/dev/null || { log "  outil manquant : $t"; return 1; }
+  done
+  [ -x "$CLAUDE" ] || { log "  claude introuvable : $CLAUDE"; return 1; }
+  claude_session_ok "$(date '+%Y-%m-%d')" || {
+    log "  session Claude invalide ou expirée : lancer « claude auth login » (ou « claude setup-token » pour un jeton longue durée)"
+    notify "ALIS — connexion Claude requise" "Lancer « claude auth login » (ou « claude setup-token »), puis relancer le cycle."
+    return 1
+  }
+  if ! with_timeout 60 head -c 64 "$ALIS_DIR/README.md" >/dev/null 2>&1 \
+     || ! with_timeout 60 ls "$ALIS_DIR/hypotheses/pending" >/dev/null 2>&1; then
+    log "  Google Drive illisible : autoriser « ALIS » (Réglages Système → Confidentialité et sécurité → Fichiers et dossiers), puis relancer"
+    notify "ALIS — accès Google Drive requis" "Autoriser « ALIS » à accéder aux fichiers Google Drive, puis relancer le cycle."
+    return 1
+  fi
+  [ -f "$AIAD/infrastructure/publish/convert.py" ] || { log "  pipeline de publication introuvable"; return 1; }
+  gh auth status >/dev/null 2>&1 || { log "  gh non authentifié"; return 1; }
+  with_timeout 60 git ls-remote --exit-code "$SDD_REMOTE" main >/dev/null 2>&1 \
+    || { log "  dépôt sdd-mode injoignable"; return 1; }
+  with_timeout 60 npm view "$NPM_PACKAGE" version >/dev/null 2>&1 || { log "  registre npm injoignable"; return 1; }
+}
+
+step_decide() {
+  alis decide --cycle "$CYCLE" >> "$LOG" 2>&1 || return 1
+  local f="$ALIS_DIR/decisions/DECISIONS-$CYCLE.json"
+  [ -s "$f" ] || return 1
+  cp "$f" "$RUN/decisions.json"
+  json_get "$f" 'sum(1 for x in d["decisions"] if x["decision"]=="GO")' > "$RUN/go_count"
+  log "  GO : $(cat "$RUN/go_count") | décisions : $(json_get "$f" 'len(d["decisions"])') | retenues pour le Gardien : $(json_get "$f" 'len(d["held"])')"
+}
+
+step_validate() {
+  alis validate "$ALIS_DIR/decisions/DECISIONS-$CYCLE.json" >> "$LOG" 2>&1
+}
+
+step_implement() {
+  export AIAD_ROOT="$AIAD" RESULT_FILE="$RUN/implement.json"
+  rm -f "$RESULT_FILE"
+  run_writer "$AIAD" "$REPO/routines/routine-implement.md" "$REPO/logs/cycle-implement.log" "$ALLOW_IMPLEMENT"
+  check_result "$RESULT_FILE" || return 1
+  [ "$(json_get "$RESULT_FILE" 'd.get("published")')" = "True" ] || { log "  doctrine non publiée"; return 1; }
+  local v; v="$(json_get "$RESULT_FILE" 'd["framework_version"]')"
+  grep -q -- "$v" "$DOCTRINE_SOURCE/20_conception/framework/frameworkAIAD.md" \
+    || { log "  la doctrine publiée ne porte pas la version $v"; return 1; }
+  log "  doctrine publiée : $v"
+}
+
+step_communication() {
+  # Brouillons (release notes, LinkedIn, Discord, X). Jamais publiés automatiquement.
+  # Non bloquant : un échec ici n'empêche ni le site ni le package.
+  run_writer "$ALIS_DIR" "$REPO/routines/routine-release.md" "$REPO/logs/cycle-communication.log" "$ALLOW_COMMUNICATION" \
+    || log "  ⚠ brouillons de communication non générés (non bloquant)"
+  return 0
+}
+
+step_sdd_prepare() {
+  if [ ! -d "$SDD/.git" ]; then
+    mkdir -p "$(dirname "$SDD")"
+    git clone --quiet "$SDD_REMOTE" "$SDD" >> "$LOG" 2>&1 || return 1
+  fi
+  cd "$SDD" || return 1
+  # Clone dédié au cycle : on repart toujours de l'état publié.
+  git fetch --quiet --tags origin >> "$LOG" 2>&1 || return 1
+  git checkout --quiet main >> "$LOG" 2>&1 || return 1
+  git reset --quiet --hard origin/main >> "$LOG" 2>&1 || return 1
+  git clean -fdq >> "$LOG" 2>&1
+  npm ci --no-audit --no-fund >> "$LOG" 2>&1 || { log "  npm ci en échec"; return 1; }
+  node scripts/sync-doctrine.js --source "$DOCTRINE_SOURCE" >> "$LOG" 2>&1 || { log "  sync-doctrine en échec"; return 1; }
+}
+
+step_site() {
+  cd "$SDD" || return 1
+  export SDD_REPO="$SDD" DOCTRINE_SOURCE IMPLEMENT_RESULT="$RUN/implement.json" RESULT_FILE="$RUN/site.json"
+  export FRAMEWORK_VERSION PREVIOUS_FRAMEWORK_VERSION
+  FRAMEWORK_VERSION="$(json_get "$RUN/implement.json" 'd["framework_version"]')"
+  PREVIOUS_FRAMEWORK_VERSION="$(json_get "$RUN/implement.json" 'd["previous_framework_version"]')"
+  rm -f "$RESULT_FILE"
+  run_writer "$SDD" "$REPO/routines/routine-site.md" "$REPO/logs/cycle-site.log" "$ALLOW_SITE"
+  check_result "$RESULT_FILE" || return 1
+  [ -z "$(git status --porcelain)" ] || { log "  arbre de travail non propre après la routine site"; return 1; }
+  [ "$(git rev-parse --abbrev-ref HEAD)" = "main" ] || { log "  la routine a quitté la branche main"; return 1; }
+  [ "$(git rev-list --count origin/main..HEAD)" -gt 0 ] || { log "  aucun commit produit"; return 1; }
+  # Garde-fou : rien d'interne ne doit partir dans le dépôt public.
+  if git diff origin/main..HEAD | grep -E '^\+' | grep -E -q 'HYP-[0-9]{4}-|SIG-[0-9]{4}-|06_AGENTS/alis|\bALIS\b'; then
+    log "  référence interne détectée dans les commits (ALIS / HYP- / SIG-)"; return 1
+  fi
+}
+
+pa11y_gate() {
+  local urls=() f
+  while IFS= read -r f; do urls+=("file://$SDD/$f"); done < <(find site -name "*.html" -type f | sort)
+  npx pa11y-ci --config .pa11yci.json "${urls[@]}" >> "$LOG" 2>&1
+}
+
+step_release() {
+  cd "$SDD" || return 1
+  local version
+  # Tout est committé à l'entrée de cette étape (vérifié par l'étape site, ou commit
+  # de release d'une tentative précédente) : on écarte les effets de bord des tests
+  # pour qu'ils ne puissent jamais être embarqués dans le commit de release.
+  git checkout --quiet -- . && git clean -fdq
+  if git log -1 --pretty=%s | grep -q '^chore: release v'; then
+    log "  commit de release déjà présent (reprise)"
+  else
+    # Intègre les commits arrivés entre-temps sur main (métriques CI) avant de taguer.
+    git pull --quiet --rebase origin main >> "$LOG" 2>&1 || { log "  rebase sur origin/main en échec"; return 1; }
+    # Tests avant le bump, avec une relance (la suite a un test instable sous forte
+    # concurrence). Elle laisse des fichiers de bench supprimés : tout étant committé
+    # à ce stade, on restaure l'arbre avant que release.js n'exige un arbre propre.
+    if ! npm test >> "$LOG" 2>&1; then
+      log "  tests en échec — une relance"
+      git checkout --quiet -- . && git clean -fdq
+      npm test >> "$LOG" 2>&1 || { git checkout --quiet -- .; git clean -fdq; log "  gate tests"; return 1; }
+    fi
+    git checkout --quiet -- . && git clean -fdq
+    AIAD_DOCTRINE_SOURCE="$DOCTRINE_SOURCE" node scripts/release.js minor --skip-tests >> "$LOG" 2>&1 \
+      || { git checkout --quiet -- .; log "  release.js en échec (drift de doctrine ou arbre non propre)"; return 1; }
+    npm pack --dry-run >> "$LOG" 2>&1 || { log "  gate tarball (npm pack)"; return 1; }
+  fi
+  version="$(node -p "require('./package.json').version")"
+
+  # release.js ne committe que package.json / CHANGELOG / DOCUMENTATION : les zones
+  # de version du site et les règles émises suivent la version, on les rattache
+  # au commit de release pour que les gates CI passent.
+  node bin/aiad-sdd.js version-sync >> "$LOG" 2>&1 || return 1
+  node bin/aiad-sdd.js emit-rules >> "$LOG" 2>&1 || return 1
+  node bin/aiad-sdd.js docs >> "$LOG" 2>&1 || return 1
+  if [ -n "$(git status --porcelain)" ]; then
+    git add -u >> "$LOG" 2>&1 || return 1
+    git commit --quiet --amend --no-edit >> "$LOG" 2>&1 || return 1
+  fi
+  [ -z "$(git status --porcelain)" ] || { log "  fichiers non suivis inattendus après release"; return 1; }
+  git tag -f "v$version" >> "$LOG" 2>&1 || return 1
+
+  # Mêmes gates que la CI, avant toute publication.
+  node bin/aiad-sdd.js version-sync --check >> "$LOG" 2>&1 || { log "  gate version-sync"; return 1; }
+  node bin/aiad-sdd.js emit-rules --check >> "$LOG" 2>&1 || { log "  gate emit-rules"; return 1; }
+  node bin/aiad-sdd.js docs --check >> "$LOG" 2>&1 || { log "  gate docs"; return 1; }
+  node scripts/check-doctrine.js >> "$LOG" 2>&1 || { log "  gate doctrine"; return 1; }
+  npm run --silent lint >> "$LOG" 2>&1 || { log "  gate lint"; return 1; }
+  npm run --silent lint:deps >> "$LOG" 2>&1 || { log "  gate lint:deps"; return 1; }
+  npm run --silent lint:size >> "$LOG" 2>&1 || { log "  gate lint:size"; return 1; }
+  npm run --silent lint:claims >> "$LOG" 2>&1 || { log "  gate lint:claims"; return 1; }
+  npm run --silent test:coverage:threshold >> "$LOG" 2>&1 || { log "  gate couverture"; return 1; }
+  pa11y_gate || { log "  gate RGAA (pa11y)"; return 1; }
+
+  if with_timeout 60 npm view "$NPM_PACKAGE@$version" version 2>/dev/null | grep -q .; then
+    log "  $NPM_PACKAGE@$version déjà publié"; return 1
+  fi
+
+  echo "$version" > "$RUN/version"
+  git rev-parse HEAD > "$RUN/sha"
+  # Publication : push de main (déclenche site-deploy) puis du tag (déclenche release.yml → npm).
+  git push --quiet origin main >> "$LOG" 2>&1 || { log "  push main refusé"; return 1; }
+  git push --quiet origin "v$version" >> "$LOG" 2>&1 || { log "  push du tag refusé"; return 1; }
+  log "  poussé : main + v$version ($(git rev-parse --short HEAD))"
+}
+
+wait_workflow() { # wait_workflow <nom du workflow> <sha> → 0 si success
+  local name="$1" sha="$2" deadline=$(( $(date +%s) + CI_TIMEOUT_S )) line status conclusion id reran=0
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    line="$(gh run list --repo "$SDD_SLUG" --commit "$sha" --json databaseId,name,status,conclusion \
+      --jq "[.[] | select(.name == \"$name\")] | sort_by(.databaseId) | last | \"\(.databaseId) \(.status) \(.conclusion)\"" 2>/dev/null)"
+    read -r id status conclusion <<< "$line"
+    if [ "$status" = "completed" ]; then
+      [ "$conclusion" = "success" ] && return 0
+      if [ "$reran" = 0 ]; then
+        log "  workflow « $name » : $conclusion — une relance"
+        gh run rerun "$id" --repo "$SDD_SLUG" --failed >> "$LOG" 2>&1
+        reran=1
+      else
+        log "  workflow « $name » : $conclusion (run $id)"; return 1
+      fi
+    fi
+    sleep 30
+  done
+  log "  workflow « $name » : délai dépassé"; return 1
+}
+
+step_verify() {
+  local version sha domain i
+  version="$(cat "$RUN/version")"; sha="$(cat "$RUN/sha")"
+  wait_workflow "Release" "$sha" || return 1
+  wait_workflow "site-deploy" "$sha" || return 1
+
+  for i in $(seq 1 20); do
+    [ "$(npm view "$NPM_PACKAGE" version 2>/dev/null)" = "$version" ] && break
+    sleep 30
+  done
+  [ "$(npm view "$NPM_PACKAGE" version 2>/dev/null)" = "$version" ] || { log "  npm n'affiche pas $version"; return 1; }
+  log "  npm : $NPM_PACKAGE@$version"
+
+  domain="$(cat "$SDD/site/CNAME")"
+  for i in $(seq 1 30); do
+    curl -fsSL --max-time 30 "https://$domain/fr/index.html?v=$version" 2>/dev/null | grep -q -- "$version" && break
+    sleep 30
+  done
+  curl -fsSL --max-time 30 "https://$domain/fr/index.html?v=$version" 2>/dev/null | grep -q -- "$version" \
+    || { log "  https://$domain n'affiche pas encore $version"; return 1; }
+  log "  site : https://$domain affiche $version"
+}
+
+write_report() { # write_report <résultat>
+  local out="$ALIS_DIR/releases/CYCLE-REPORT-$CYCLE.md"
+  python3 "$REPO/bin/alis-cycle-report.py" "$RUN" "$CYCLE" "$NEXT_CYCLE" "$1" > "$RUN/report.md" || return 1
+  cp "$RUN/report.md" "$out"
+}
+
+step_close() {
+  local version detail
+  version="$(cat "$RUN/version" 2>/dev/null || true)"
+  detail="doctrine $(json_get "$RUN/implement.json" 'd["framework_version"]'), $NPM_PACKAGE@$version"
+  write_report "publié — $detail" || return 1
+  alis cycle-advance --outcome released --detail "$detail" >> "$LOG" 2>&1 || return 1
+  notify "ALIS — cycle $CYCLE publié" "$detail. Prochain cycle : $NEXT_CYCLE."
+}
+
+close_without_go() {
+  write_report "aucune hypothèse au-dessus du seuil : rien à publier" || return 1
+  alis cycle-advance --outcome no-go --detail "aucun GO" >> "$LOG" 2>&1 || return 1
+  notify "ALIS — cycle $CYCLE clos" "Aucune hypothèse au-dessus de 14/20 : rien à publier. Prochain cycle : $NEXT_CYCLE."
+}
+
+# ─── Déroulé ────────────────────────────────────────────────────────────────
+
+export CYCLE NEXT_CYCLE CYCLE_MONTH
+
+run_step preflight step_preflight
+run_step decide step_decide
+run_step validate step_validate
+
+if [ "$(cat "$RUN/go_count")" = "0" ]; then
+  log "Aucun GO ce cycle — clôture sans publication"
+  run_step close close_without_go
+  exit 0
+fi
+
+run_step implement step_implement
+run_step communication step_communication
+run_step sdd-prepare step_sdd_prepare
+run_step site step_site
+run_step release step_release
+run_step verify step_verify
+run_step close step_close
+
+log "═══ Cycle $CYCLE terminé ═══"

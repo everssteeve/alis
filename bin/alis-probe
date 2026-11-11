@@ -1,0 +1,17 @@
+#!/bin/bash
+# ALIS — Sonde d'accès Google Drive (lecture + listage), à lancer via ALIS.app :
+#   open -W -n -a ~/Dev/repos/alis/launcher/ALIS.app --args probe [timeout_s]
+# Écrit DRIVE_READ=ok|denied dans logs/probe.log ; code de sortie 0 si ok.
+REPO="/Users/steeve/Dev/repos/alis"
+ALIS_DIR="/Users/steeve/Library/CloudStorage/GoogleDrive-evers.steeve@gmail.com/Mon Drive/AIAD/06_AGENTS/alis"
+T="${1:-60}"
+{
+  echo "probe $(date '+%Y-%m-%d %H:%M:%S')"
+  if perl -e 'alarm shift; exec @ARGV' "$T" head -c 64 "$ALIS_DIR/README.md" >/dev/null \
+     && perl -e 'alarm shift; exec @ARGV' "$T" ls "$ALIS_DIR/hypotheses/pending" >/dev/null; then
+    echo "DRIVE_READ=ok"
+  else
+    echo "DRIVE_READ=denied"
+  fi
+} > "$REPO/logs/probe.log" 2>&1
+grep -q "DRIVE_READ=ok" "$REPO/logs/probe.log"

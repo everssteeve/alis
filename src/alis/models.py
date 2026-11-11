@@ -69,7 +69,7 @@ class Hypothesis:
     benefit: str = ""
     risk: str = ""
     effort: str = ""
-    score: int = 0
+    score: float = 0
     signal_ids: list[str] = field(default_factory=list)
     decision: Decision = Decision.PENDING
     decision_date: str = ""

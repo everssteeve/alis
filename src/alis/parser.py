@@ -92,6 +92,25 @@ def parse_signal(path: Path) -> Signal:
     )
 
 
+SCORE_RE = re.compile(r"\*\*Total\*\*\s*:\s*(\d+(?:[.,]\d+)?)\s*/\s*20")
+
+
+def parse_score(content: str) -> float:
+    """Extrait le score agrégé `**Total** : X/20` (0 si absent)."""
+    m = SCORE_RE.search(content)
+    if not m:
+        return 0
+    value = float(m.group(1).replace(",", "."))
+    return int(value) if value.is_integer() else value
+
+
+def format_score(score: float) -> str:
+    """Formate un score comme dans les fichiers ALIS : 15 → "15", 14.5 → "14,5"."""
+    if float(score).is_integer():
+        return str(int(score))
+    return f"{score:g}".replace(".", ",")
+
+
 def parse_hypothesis(path: Path) -> Hypothesis:
     content = path.read_text(encoding="utf-8")
 
@@ -102,9 +121,8 @@ def parse_hypothesis(path: Path) -> Hypothesis:
     title_m = re.search(r"## Titre\n(.+)", content)
     title = title_m.group(1).strip() if title_m else ""
 
-    # Score
-    score_m = re.search(r"\*\*Total\*\*\s*:\s*(\d+)/20", content)
-    score = int(score_m.group(1)) if score_m else 0
+    # Score — accepte les décimales à la française ("14,5/20") ou à l'anglaise
+    score = parse_score(content)
 
     # Composante
     comp_m = re.search(r"## Composante impactée\n(.+)", content)
@@ -142,6 +160,16 @@ def parse_hypothesis(path: Path) -> Hypothesis:
     # Cycle de report
     deferred_m = re.search(r"cycle\s+(\d{4}-\d{2}-\d{2})", content, re.IGNORECASE)
 
+    # Date de décision Guardian (écrite par validate.py : **Date** : YYYY-MM-DD)
+    decision_date_m = re.search(
+        r"## Décision du Gardien\n\*\*Date\*\*\s*:\s*(\d{4}-\d{2}-\d{2})", content
+    )
+    decision_date = decision_date_m.group(1) if decision_date_m else ""
+
+    # Commentaire de décision
+    decision_comment_m = re.search(r"\*\*Commentaire\*\*\s*:\s*(.+)", content)
+    decision_comment = decision_comment_m.group(1).strip() if decision_comment_m else ""
+
     return Hypothesis(
         id=hyp_id,
         title=title,
@@ -154,6 +182,8 @@ def parse_hypothesis(path: Path) -> Hypothesis:
         score=score,
         signal_ids=list(dict.fromkeys(signal_ids)),  # déduplique
         decision=decision,
+        decision_date=decision_date,
+        decision_comment=decision_comment,
         deferred_from=deferred_m.group(1) if deferred_m else "",
         path=path,
         raw_content=content,

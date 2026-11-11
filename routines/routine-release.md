@@ -6,11 +6,13 @@ Tu es l'agent ALIS (AIAD Lunar Intelligence System). Tu dois générer les 4 art
 
 **Dossier ALIS** : `/Users/steeve/Library/CloudStorage/GoogleDrive-evers.steeve@gmail.com/Mon Drive/AIAD/06_AGENTS/alis`
 
-Cette routine est déclenchée **manuellement** après la session de décision Guardian. Les décisions ont déjà été appliquées par `alis validate` (les hypothèses sont dans go/, nogo/, deferred/).
+Cette routine est lancée automatiquement par `bin/alis-cycle` après l'implémentation (session **non interactive** : ne pose aucune question). Les décisions du cycle ont été prises par la règle permanente du Gardien (GO si score > 14/20, adoptée le 11 novembre 2026) ou par ses décisions explicites, puis appliquées par `alis validate` (les hypothèses sont dans go/, nogo/, deferred/). Le détail est dans `decisions/DECISIONS-{{CYCLE}}.json` (champ `source` : `règle` ou `gardien`) et `IMPLEMENTATION-CYCLE-{{CYCLE}}.md`.
 
-## Paramètre requis
+Tu produis des **brouillons** : rien n'est publié sur LinkedIn, Discord ou X. Aucune mention d'ALIS, d'identifiant interne (`HYP-…`, `SIG-…`) ni de nom de client dans ces contenus.
 
-**Cycle** (date de la pleine lune) : [YYYY-MM-DD — à préciser au lancement]
+## Paramètre
+
+**Cycle** : {{CYCLE}}
 
 ## Étape 1 — Charger les décisions du cycle
 
@@ -34,7 +36,7 @@ Release notes exhaustives, format markdown, pour la communauté technique.
 Structure :
 ```markdown
 # AIAD Release Notes — [VERSION si applicable]
-**Pleine lune du [DATE LONGUE]**
+**Cycle du [DATE LONGUE]**
 
 ## Ce qui a changé
 
@@ -48,7 +50,7 @@ Structure :
 ## Ce qui a été rejeté (et pourquoi)
 
 ### [Titre de l'hypothèse rejetée]
-**Raison du rejet** : [justification honnête du Gardien]
+**Raison du rejet** : [justification honnête — décision du Gardien, ou clôture par péremption]
 
 ---
 
@@ -56,7 +58,7 @@ Structure :
 
 ### [Titre de l'hypothèse reportée]
 **Raison du report** : [ce qui doit changer pour qu'elle soit GO]
-**Score au prochain cycle** : [score actuel + 2]
+**Suite** : [close au prochain cycle si aucun nouveau signal ne relève le score]
 
 ---
 

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ovh.aiad.alis-briefing</string>
+
+    <!-- Lancé via ALIS.app : le briefing de préavis lit les hypothèses sur le
+         Drive (`alis decide --dry-run`), ce qu'un job launchd nu ne peut pas faire. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/open</string>
+        <string>-W</string>
+        <string>-n</string>
+        <string>-a</string>
+        <string>/Users/steeve/Dev/repos/alis/launcher/ALIS.app</string>
+        <string>--args</string>
+        <string>briefing</string>
+    </array>
+
+    <!-- Tous les samedis à 07h00 : le cycle (cadence de 28 jours) tombe un lundi,
+         le briefing de préavis part donc à J-2. La routine s'arrête d'elle-même
+         si le cycle est à plus de 5 jours. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>6</integer>
+        <key>Hour</key>
+        <integer>7</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/steeve/Dev/repos/alis/logs/briefing-stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/steeve/Dev/repos/alis/logs/briefing-stderr.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

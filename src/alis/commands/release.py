@@ -105,9 +105,9 @@ def run_release(cycle: str | None = None, dry_run: bool = False) -> None:
     nogo_hyps = _load_hyps_from_dir(HYPOTHESES_NOGO)
     defer_hyps = _load_hyps_from_dir(HYPOTHESES_DEFERRED)
 
-    # Filtrer par cycle si possible (date dans le nom de fichier)
+    # Filtrer par date de décision Guardian (écrite par validate dans le fichier)
     def filter_cycle(hyps: list, cycle: str) -> list:
-        filtered = [h for h in hyps if cycle[:7] in h.id]
+        filtered = [h for h in hyps if h.decision_date == cycle]
         return filtered if filtered else hyps
 
     go_hyps = filter_cycle(go_hyps, cycle)

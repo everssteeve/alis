@@ -7,3 +7,7 @@ dist/
 .ruff_cache/
 logs/
 .DS_Store
+state/
+work/
+launcher/ALIS.app/Contents/MacOS/
+launcher/ALIS.app/Contents/_CodeSignature/

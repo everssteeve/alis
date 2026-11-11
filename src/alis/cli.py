@@ -48,6 +48,77 @@ def score(dry_run: bool) -> None:
     run_score(dry_run=dry_run)
 
 
+# ── Phase 3 bis — Decide (délégation permanente du Gardien) ──────────────────
+
+@main.command()
+@click.option("--cycle", default=None, help="Date du cycle YYYY-MM-DD (défaut : cycle courant)")
+@click.option("--dry-run", is_flag=True, help="Affiche les décisions sans écrire le fichier")
+@click.option("--json", "as_json", is_flag=True, help="Sortie JSON (pour les routines)")
+def decide(cycle: str | None, dry_run: bool, as_json: bool) -> None:
+    """Applique la règle de décision automatique (GO si score > 14/20).
+
+    Écrit decisions/DECISIONS-YYYY-MM-DD.json, à appliquer avec `alis validate`.
+    Les décisions explicites du Gardien (decisions/OVERRIDES-YYYY-MM-DD.json)
+    priment sur la règle.
+    """
+    from .commands.decide import run_decide
+    from .cycle import load_state
+
+    run_decide(cycle or load_state().next_cycle.isoformat(), dry_run=dry_run, as_json=as_json)
+
+
+# ── Cadence du cycle (28 jours) ───────────────────────────────────────────────
+
+@main.command("cycle-init")
+@click.option("--next", "next_cycle", required=True, help="Date du prochain cycle YYYY-MM-DD")
+@click.option("--last", "last_cycle", default=None, help="Date du dernier cycle arbitré")
+def cycle_init(next_cycle: str, last_cycle: str | None) -> None:
+    """Initialise (ou recale) l'état du cycle."""
+    from datetime import date
+
+    from .cycle import CycleState, CycleStateError, load_state, save_state
+
+    try:
+        state = load_state()
+        state.next_cycle = date.fromisoformat(next_cycle)
+    except CycleStateError:
+        state = CycleState(next_cycle=date.fromisoformat(next_cycle))
+    if last_cycle:
+        state.last_cycle = date.fromisoformat(last_cycle)
+    save_state(state)
+    console.print(f"Prochain cycle : [cyan]{state.next_cycle}[/cyan] (cadence {state.cadence_days} jours)")
+
+
+@main.command("cycle-status")
+def cycle_status() -> None:
+    """Affiche la date du prochain cycle (format stable, lisible par les routines)."""
+    from datetime import date
+
+    from .cycle import load_state
+
+    state = load_state()
+    today = date.today()
+    print(f"next_cycle={state.next_cycle.isoformat()}")
+    print(f"days_until={state.days_until(today)}")
+    print(f"due={'yes' if state.is_due(today) else 'no'}")
+    print(f"cadence_days={state.cadence_days}")
+    print(f"last_cycle={state.last_cycle.isoformat() if state.last_cycle else ''}")
+
+
+@main.command("cycle-advance")
+@click.option("--outcome", required=True, help="Résultat du cycle clos (released, no-go, ...)")
+@click.option("--detail", default="", help="Détail libre (versions publiées, ...)")
+def cycle_advance(outcome: str, detail: str) -> None:
+    """Clôt le cycle courant et planifie le suivant (cadence fixe)."""
+    from datetime import date
+
+    from .cycle import advance, load_state, save_state
+
+    state = advance(load_state(), date.today(), outcome, detail)
+    save_state(state)
+    print(f"next_cycle={state.next_cycle.isoformat()}")
+
+
 # ── Phase 4 — Validate ────────────────────────────────────────────────────────
 
 @main.command()
