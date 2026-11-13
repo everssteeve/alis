@@ -33,6 +33,8 @@ Ce mandat vaut accord explicite pour modifier le corpus, lancer le pipeline de p
 ### 1 — Charger le cycle
 Lis `DECISIONS-{{CYCLE}}.json`, puis chaque hypothèse GO et ses signaux source. Lis `06_AGENTS/alis/IMPLEMENTATION-CYCLE-{{CYCLE}}.md` s'il existe : s'il contient déjà un suivi d'implémentation (reprise après interruption), ne refais pas les lots marqués faits.
 
+**Reprise après une tentative interrompue.** Une tentative précédente a pu s'arrêter en plein travail, sans rien tracer. Avant de rédiger, cherche les archives de ce cycle (`find 01_ENTITIES/aiad-produits -name "*-{{CYCLE}}.md" -path "*/archives/*"`) et compare chacune à son fichier courant (`diff`). Un fichier qui diffère de son archive a déjà été modifié pour ce cycle : relis ces ajouts, garde ce qui est correct et sourcé, complète ce qui manque, et ne les écris pas une seconde fois. Un fichier identique à son archive n'a pas encore été traité. Ne recrée jamais une archive qui existe : elle porte l'état d'avant le cycle.
+
 ### 2 — Planifier par artefact
 Regroupe les modifications par fichier cible : **un seul passage par artefact**, même si plusieurs hypothèses le touchent. Signale et fusionne les recoupements entre hypothèses (règles en double).
 

@@ -12,6 +12,8 @@ La doctrine AIAD vient de passer de {{PREVIOUS_FRAMEWORK_VERSION}} à **{{FRAMEW
 
 Le script a lancé `node scripts/sync-doctrine.js` : les 14 fichiers de doctrine livrés (agents de gouvernance, `templates/frameworkAIAD.md`, `templates/SDDMode.md`, `docs/legitimation/`), `templates/doctrine.lock.json` et les règles émises sont à jour dans l'arbre de travail, **non committés**. `git status` et `git diff` te montrent ce que la doctrine a changé.
 
+**Reprise après une tentative interrompue ou en échec.** Si `git status` est propre et que `git log origin/main..HEAD` montre déjà des commits de doctrine ou de site pour {{FRAMEWORK_VERSION}}, une tentative précédente a fait le travail : ne le refais pas, ne recrée ni commit ni issue. Relis ces commits, complète seulement ce qui manque, puis passe directement à l'étape 5 (vérifier) et à l'étape 6. Reprends dans le résultat les issues déjà ouvertes (`gh issue list`).
+
 ## Entrées
 
 - Résumé de la montée de doctrine : `{{IMPLEMENT_RESULT}}` (JSON : `public_changes`, `software_changes`, `summary`)
