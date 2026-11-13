@@ -107,7 +107,7 @@ Le passage quotidien d'`alis-cycle` sert de rattrapage : si le Mac était étein
 - **Trois prérequis à tenir** :
   1. **Mac allumé** et session ouverte autour de 08h30 (sinon rattrapage au prochain passage).
   2. **Accès Google Drive pour « ALIS »** : accordé une fois (boîte de dialogue macOS, ou Réglages Système → Confidentialité et sécurité → Fichiers et dossiers → ALIS). À redonner si `launcher/build.sh` est relancé.
-  3. **Session Claude valide** : une connexion `claude auth login` expire. Pour des jobs sans surveillance, préfère `claude setup-token` (jeton longue durée). `alis-cycle` te prévient dans la semaine qui précède si la session expire avant le cycle.
+  3. **Session Claude valide** : une connexion `claude auth login` expire. Pour des jobs sans surveillance, préfère `claude setup-token` (jeton longue durée). `alis-cycle` te prévient dans la semaine qui précède si la session expire avant le cycle. Le jeton se range dans `~/.config/alis/claude-token` (mode 600, hors dépôt) : les quatre jobs le lisent s'il commence par `sk-ant-oat`, et l'ignorent sinon.
 - Le secret GitHub **`NPM_TOKEN`** du dépôt `sdd-mode` doit rester valide (publication npm par `release.yml`).
 
 ---

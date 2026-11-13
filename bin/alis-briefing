@@ -1,4 +1,16 @@
 #!/bin/bash
+
+# Long-lived Claude token for unattended runs (created with `claude setup-token`,
+# stored outside the repo, mode 600). Without it the interactive sign-in is used.
+ALIS_CLAUDE_TOKEN_FILE="${ALIS_CLAUDE_TOKEN_FILE:-$HOME/.config/alis/claude-token}"
+if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -r "$ALIS_CLAUDE_TOKEN_FILE" ]; then
+  _alis_token="$(tr -d '[:space:]' < "$ALIS_CLAUDE_TOKEN_FILE")"
+  case "$_alis_token" in
+    sk-ant-oat*) export CLAUDE_CODE_OAUTH_TOKEN="$_alis_token" ;;
+    *) echo "ALIS: $ALIS_CLAUDE_TOKEN_FILE does not hold a Claude token (expected sk-ant-oat…); ignored" >&2 ;;
+  esac
+  unset _alis_token
+fi
 # ALIS — Génération du briefing Guardian (samedi 07h00)
 exec /Users/steeve/.local/bin/claude --dangerously-skip-permissions -p \
   "$(cat /Users/steeve/Dev/repos/alis/routines/routine-briefing.md)" \
