@@ -432,12 +432,15 @@ step_verify() {
   log "  npm : $NPM_PACKAGE@$version"
 
   domain="$(cat "$SDD/site/CNAME")"
+  # Fetch the page fully, then search it: piping curl into `grep -q` under
+  # pipefail fails at random, because grep exits early and curl dies of SIGPIPE.
+  local page="" shown=0
   for i in $(seq 1 30); do
-    curl -fsSL --max-time 30 "https://$domain/fr/index.html?v=$version" 2>/dev/null | grep -q -- "$version" && break
+    page="$(curl -fsSL --max-time 30 "https://$domain/fr/index.html?v=$version" 2>/dev/null || true)"
+    case "$page" in *"$version"*) shown=1; break ;; esac
     sleep 30
   done
-  curl -fsSL --max-time 30 "https://$domain/fr/index.html?v=$version" 2>/dev/null | grep -q -- "$version" \
-    || { log "  https://$domain n'affiche pas encore $version"; return 1; }
+  [ "$shown" = 1 ] || { log "  https://$domain n'affiche pas encore $version"; return 1; }
   log "  site : https://$domain affiche $version"
 }
 

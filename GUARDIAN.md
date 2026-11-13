@@ -15,7 +15,7 @@ AUTOMATIQUE                                     TOI (facultatif)
 Lundi (hebdo)     collecte des signaux
 Mercredi (hebdo)  scoring + hypothèses
 Samedi J-2        briefing de préavis          → infirmer / forcer une décision
-Lundi du cycle    décision (règle > 14/20)       (decisions/OVERRIDES-<cycle>.json)
+Jour du cycle     décision (règle > 14/20)       (decisions/OVERRIDES-<cycle>.json)
   08h30           implémentation du corpus
                   publication de la doctrine
                   brouillons de communication   → publier LinkedIn / Discord / X
@@ -24,7 +24,7 @@ Lundi du cycle    décision (règle > 14/20)       (decisions/OVERRIDES-<cycle>.
                   rapport de cycle + notification
 ```
 
-Le cycle revient **tous les 28 jours**, toujours un lundi : 23 novembre 2026, 21 décembre 2026, 18 janvier 2027…
+Le cycle revient **tous les 28 jours**, à partir du cycle du 11 novembre 2026 : 9 décembre 2026, 6 janvier 2027, 3 février 2027…
 
 ---
 
@@ -76,7 +76,7 @@ Quatre agents macOS (`launchd`), via ton compte Claude Max.
 | `ovh.aiad.alis-briefing` | Samedi 07h00 | À 5 jours ou moins du cycle : briefing de préavis dans `briefings/` |
 | `ovh.aiad.alis-cycle` | Tous les jours 08h30 | Ne fait rien tant que le cycle n'est pas dû ; le jour venu, déroule tout le cycle |
 
-Le passage quotidien d'`alis-cycle` sert de rattrapage : si le Mac était éteint le lundi du cycle, le cycle part le lendemain, sans décaler les suivants.
+Le passage quotidien d'`alis-cycle` sert de rattrapage : si le Mac était éteint le jour du cycle, le cycle part le lendemain, sans décaler les suivants.
 
 ### Les étapes du cycle (`bin/alis-cycle`)
 
